@@ -44,7 +44,6 @@ public class Parser
         }
         else
         {
-            await Task.Delay(200);
             await GetFuturesNamesAsync(request.Data?.NextPageCursor);
         }
     }
@@ -84,11 +83,11 @@ public class Parser
                 Console.Write($"|{request.CurrencyName} - {request.IntervalToSearch}|");
                 var query = await _apiClient.Market.GetKlinesAsync(BybitCategory.Linear, request.CurrencyName, request.IntervalToSearch, request.StartPoint, request.EndPoint, 1000);
                 foreach (var kline in query.Data) marketKlines.Add(kline);
-                return SortAndCheck(marketKlines, request.IntervalToSearch);
+                return SortAndCheck(marketKlines, request.IntervalToSearch, out _);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"{ex.Message} GetChartForTerm ({request.IntervalToSearch} case)");
+                Console.WriteLine($"{ex.Message} GetChartForTerm ({request.IntervalToSearch}) {request.StartPoint} - {request.EndPoint}");
                 return [];
             }
         }
@@ -129,7 +128,7 @@ public class Parser
             }
             await Task.WhenAll(finders);
             sw.Stop();
-            return SortAndCheck(marketKlines, request.IntervalToSearch, sw.ElapsedMilliseconds);
+            return SortAndCheck(marketKlines, request.IntervalToSearch, out _, sw.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
@@ -138,8 +137,9 @@ public class Parser
         }
     }
 
-    private List<BybitMarketKline> SortAndCheck(List<BybitMarketKline> marketKlines, BybitInterval interval, long elapsedMilliseconds = 1000)
+    public static List<BybitMarketKline> SortAndCheck(List<BybitMarketKline> marketKlines, BybitInterval interval, out List<(DateTime, DateTime)> gaps, long elapsedMilliseconds = 1000)
     {
+        gaps = new();
         marketKlines = marketKlines.OrderBy(kline => kline.OpenTime).DistinctBy(kline => kline.OpenTime).ToList();
         int intInterval = (int)interval;
         int compareBy = interval switch
@@ -148,22 +148,29 @@ public class Parser
             BybitInterval.OneWeek => 2,
             _ => 1
         };
-        try
+        for (int step = 1; step < marketKlines.Count; step++)
         {
-            for (int step = 1; step < marketKlines.Count; step++)
+            if (compareBy == 1 && marketKlines[step].OpenTime != marketKlines[step - 1].OpenTime.AddMinutes(intInterval / 60))
             {
-                if (compareBy == 1 && marketKlines[step].OpenTime != marketKlines[step - 1].OpenTime.AddMinutes(intInterval / 60)) throw new Exception();
-                else if (compareBy == 2 && marketKlines[step].OpenTime != marketKlines[step - 1].OpenTime.AddDays(7)) throw new Exception();
-                else if (compareBy == 3 && marketKlines[step].OpenTime != marketKlines[step - 1].OpenTime.AddMonths(1)) throw new Exception();
+                // Console.WriteLine($"\tError: Gaps found:: {marketKlines[step - 1].OpenTime} - {marketKlines[step].OpenTime}, {interval}");
+                gaps.Add((marketKlines[step - 1].OpenTime, marketKlines[step].OpenTime));
+                continue;
             }
-            Console.WriteLine($"\tData is full: {marketKlines.First().OpenTime} - {marketKlines.Last().OpenTime}, {(double)elapsedMilliseconds / 1000} sec, {marketKlines.Count} records");
-            return marketKlines;
+            else if (compareBy == 2 && marketKlines[step].OpenTime != marketKlines[step - 1].OpenTime.AddDays(7))
+            {
+                // Console.WriteLine($"\tError: Gaps found:: {marketKlines[step - 1].OpenTime} - {marketKlines[step].OpenTime}, {interval}");
+                gaps.Add((marketKlines[step - 1].OpenTime, marketKlines[step].OpenTime));
+                continue;
+            }
+            else if (compareBy == 3 && marketKlines[step].OpenTime != marketKlines[step - 1].OpenTime.AddMonths(1))
+            {
+                // Console.WriteLine($"\tError: Gaps found:: {marketKlines[step - 1].OpenTime} - {marketKlines[step].OpenTime}, {interval}");
+                gaps.Add((marketKlines[step - 1].OpenTime, marketKlines[step].OpenTime));
+                continue;
+            }
         }
-        catch
-        {
-            Console.WriteLine("Error: Data isn't full");
-            return [];
-        }
+        if (gaps.Count == 0) Console.WriteLine($"\tData is full: {marketKlines.First().OpenTime} - {marketKlines.Last().OpenTime}, {(double)elapsedMilliseconds / 1000} sec, {marketKlines.Count} records - {interval}");
+        return marketKlines;
     }
 
     public List<ArmedBybitMarketKline> GetSeveralCandles(int n, List<ArmedBybitMarketKline> data, int startIndex)
