@@ -22,7 +22,7 @@ public class ArmedBybitMarketKline : BybitMarketKline
         QuoteVolume = kline.QuoteVolume;
         ChangePercent = (OpenPrice - ClosePrice) / (OpenPrice / 100);
         Type = ChangePercent < 0 ? CandleType.Bull : ChangePercent > 0 ? CandleType.Bear : CandleType.Zero;
-        ChangePercent = Math.Abs(ChangePercent);
+        // ChangePercent = Math.Abs(ChangePercent);
         if (Type == CandleType.Bull) (UpperTail, DownTail) =
         (Math.Abs((ClosePrice - HighPrice) / (ClosePrice / 100)), (OpenPrice - LowPrice) / (OpenPrice / 100));
         else if (Type == CandleType.Bear) (UpperTail, DownTail) =
