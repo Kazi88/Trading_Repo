@@ -2,8 +2,7 @@ public class Program
 {
     public static async Task Main()
     {
-        Parser parser = Parser.GetParser("key", "keySecret");
+        Parser parser = Parser.GetParser();
         DbRelation relation = new(parser);
-        await relation.InitTables();
     }
 }
