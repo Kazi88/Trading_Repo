@@ -157,6 +157,62 @@ public class DbRelation
             return res;
         }
     }
+ 
+    public async Task FillTablesGaps(List<string>? tables = null) // all existing or concrete //Заполняет разрывы в open_time(Все интервалы)
+    {
+        await EnsureExistingTables();
+        if (tables is not null)
+        {
+            foreach (string table in tables)
+            {
+                var gapsToFill = await CheckTableIntegrity(table);
+                await FillConcreteGaps(gapsToFill, table);
+            }
+            Console.WriteLine("\tAll gaps filled.");
+            return;
+        }
+        else
+        {
+            foreach (string tableName in _tablesNames)
+            {
+                var gapsToFill = await CheckTableIntegrity(tableName);
+                await FillConcreteGaps(gapsToFill, tableName);
+            }
+        }
+        Console.WriteLine("\tAll gaps filled.");
+    }
+
+    private async Task EnsureExistingTables()
+    {
+        using (var conn = new NpgsqlConnection(_connectionString))
+        {
+            string tablesNamesQuery = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'";
+            await conn.OpenAsync();
+            using (NpgsqlCommand cmd = new(tablesNamesQuery, conn))
+            {
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        _tablesNames.Add(reader.GetString(0));
+                    }
+                }
+                if (_tablesNames.Count == 0) throw new Exception("No tables in db");
+            }
+        }
+    }
+
+    private async Task FillConcreteGaps(List<(DateTime start, DateTime end, BybitInterval spacing)> gapsToFill, string tokenName)    // lastDate, interval, currencyName
+    {
+        foreach (var gap in gapsToFill)
+        {
+            DateTime start = gap.start;
+            DateTime end = gap.end;
+            int interval = (int)gap.spacing;
+            var data = (await _parser.GetChartForTerm(tokenName, (BybitInterval)interval, start.AddSeconds(interval), end.AddSeconds(-interval))).GetArmedKlines();
+            await InsertData(data, intervals.Where(interval => interval.Key == gap.spacing).First().Value, $"{tokenName}");
+        }
+    }
 
     private async Task FillTableGaps(string tableName) // all existing or concrete //Заполняет разрывы в open_time(Все интервалы)
     {
