@@ -5,19 +5,21 @@ using System.Diagnostics;
 using System.Data.Common;
 using Bybit.Api.Market;
 
-
-
-class DbRelation
+public class DbRelation
 {
-    private string _connectionString = "Host=localhost;Port=5432;Database=candles_repo;Username=super_user;Password=qwerty";
+    private string? _connectionString;
     private Parser _parser;
-    private static SemaphoreSlim _semaphore = new(11, 11);
+    private static SemaphoreSlim _semaphore = new(12, 12);
     private List<string> _tablesNames = new();
+    public static List<string> MainFutures = new(){"BTCUSDT", "ETHUSDT", "XRPUSDT", "DOGEUSDT", "SOLUSDT", "SUIUSDT", "1000PEPEUSDT", "HYPEUSDT",
+    "FARTCOINUSDT", "TRUMPUSDT", "PUMPFUNUSDT", "XPLUSDT", "WLFIUUSDT", "LINEAUSDT", "BARDUSDT" };
     private List<KeyValuePair<BybitInterval, string>> intervals = new()
     {
         new(OneDay, "1D"),
         new(FourHours, "4H"),
         new(TwoHours, "2H"),
+        new(OneHour, "1H"),
+        new(ThirtyMinutes, "30M"),
         new(FifteenMinutes, "15M"),
         new(FiveMinutes, "5M"),
         new(OneMinute, "1M"),
@@ -25,6 +27,7 @@ class DbRelation
     public DbRelation(Parser parser)
     {
         _parser = parser;
+        _connectionString = Config.GetConfig()?.DB_CONNECTION_STRING;
     }
     public async Task InitTables(List<string>? tablesNames = null)              // null for all futures from launch
     {
@@ -32,36 +35,50 @@ class DbRelation
         await _parser.GetFuturesNamesAsync();
         foreach (var tokenName in tablesNames ?? _parser.futuresList)
         {
-            if (tablesNames is null && !_tablesNames.Contains(tokenName))
-            {
-                await CreateTable(tokenName);
-                foreach (var interval in intervals)
-                {
-                    var data = (await _parser.GetChartFromLaunch(tokenName, interval.Key)).GetArmedKlines();
-                    if (data.Count != 0) await InsertData(data, interval.Value, $"{tokenName}");
-                }
-                await FillTablesGaps(new() { tokenName });
-                await FillToNow(tokenName);
-            }
-            else
-            {
-                await FillTablesGaps(new() { tokenName });
-                await FillToNow(tokenName);
-            }
+            await InitTable(tokenName);
         }
     }
-    public async Task<bool> InsertData(List<ArmedBybitMarketKline> klines, string duration, string tokenName)
+
+    public async Task InitTable(string tokenName)
+    {
+        await EnsureExistingTables();
+        if (!_tablesNames.Contains(tokenName)) await CreateTable(tokenName);
+        using (var conn = new NpgsqlConnection(_connectionString))
+        {
+            await conn.OpenAsync();
+            foreach (var interval in intervals)
+            {
+                string query = $"SELECT duration, open_time FROM \"{tokenName}\" where duration = CAST('{interval.Value}' as interval)order by duration asc, open_time asc";
+                using (var cmd = new NpgsqlCommand(query, conn))
+                {
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        if (!reader.HasRows)
+                        {
+                            var data = (await _parser.GetChartFromLaunch(tokenName, interval.Key)).GetArmedKlines();
+                            if (data.Count != 0) await InsertData(data, interval.Value, $"{tokenName}");
+                        }
+                    }
+                }
+            }
+            if (!await FillToNow(tokenName)) await FillToNow(tokenName);
+            await FillTableGaps(tokenName);
+        }
+    }
+
+    private async Task<bool> InsertData(List<ArmedBybitMarketKline> klines, string duration, string tokenName)
     {
         tokenName = $"\"{tokenName}\"";
         DbRequest dbRequest = new(tokenName, duration, klines.Count, 0, klines.Count - 1);
         List<DateTime> dataToAdd = klines.Select(candle => candle.OpenTime).ToList();
         int result = 0;
         Stopwatch sw = new();
-        if(dbRequest.TasksCount == 1)
+        if (dbRequest.TasksCount == 1)
         {
             try
             {
                 sw.Start();
+                Console.Write("Inserting to database: ");
                 result += await InsertDataForTerm(klines, 0, dbRequest, dataToAdd);
                 sw.Stop();
                 Console.WriteLine($"{result} records added, {Math.Round((double)sw.ElapsedMilliseconds / 1000, 2)} sec.");
@@ -72,6 +89,7 @@ class DbRelation
                 throw new Exception();
             }
         }
+        Console.Write("Inserting to database: ");
         Task<int>[] fillers = new Task<int>[dbRequest.TasksCount];
         sw.Start();
         for (int i = 0; i < dbRequest.TasksCount; i++)
@@ -97,10 +115,11 @@ class DbRelation
             for (int i = startPoint; i < klines.Count; i++)
             {
                 int n = i;
-                string query = @$"INSERT INTO {request.TokenName}(open_time, duration, open_price, high_price, low_price, close_price, volume, change_percent,
-                macd_indicator, boll_indicator, rsi_indicator, sma_indicator, upper_tail, down_tail) VALUES
-                (@dateTime, CAST(@duration AS interval), @openPrice, @highPrice, @lowPrice, @closePrice, @volume, @changePercent,
-                @macd, @boll, @rsi, @sma, @upperTail, @downTail);";
+                var k = klines[n];
+                string query = @$"INSERT INTO {request.TokenName}(open_time, duration, open_price, high_price, low_price, close_price,
+                volume, quote_volume, change_percent, upper_tail, down_tail) VALUES
+                (@dateTime, CAST(@duration AS interval), @openPrice, @highPrice, @lowPrice,
+                @closePrice, @volume, @quote_volume, @changePercent, @upperTail, @downTail)";
                 try
                 {
                     using (var cmd = new NpgsqlCommand(query, connection))
@@ -113,11 +132,8 @@ class DbRelation
                         options.AddWithValue("lowPrice", klines[n].LowPrice);
                         options.AddWithValue("closePrice", klines[n].ClosePrice);
                         options.AddWithValue("volume", klines[n].Volume);
+                        options.AddWithValue("quote_volume", klines[n].QuoteVolume);
                         options.AddWithValue("changePercent", klines[n].ChangePercent);
-                        options.AddWithValue("macd", NpgsqlTypes.NpgsqlDbType.Unknown, $"({klines[n].MACD.Signal},{klines[n].MACD.Fast},{klines[n].MACD.Slow})");
-                        options.AddWithValue("boll", NpgsqlTypes.NpgsqlDbType.Unknown, $"({klines[n].BOLL.MiddleBand},{klines[n].BOLL.UpperBand},{klines[n].BOLL.LowerBand})");
-                        options.AddWithValue("rsi", klines[n].RSI);
-                        options.AddWithValue("sma", klines[n].SMA);
                         options.AddWithValue("upperTail", klines[n].UpperTail);
                         options.AddWithValue("downTail", klines[n].DownTail);
                         res += await cmd.ExecuteNonQueryAsync();
@@ -141,29 +157,17 @@ class DbRelation
             return res;
         }
     }
- 
-    public async Task FillTablesGaps(List<string>? tables = null) // all existing or concrete //Заполняет разрывы в open_time(Все интервалы)
+
+    private async Task FillTableGaps(string tableName) // all existing or concrete //Заполняет разрывы в open_time(Все интервалы)
     {
         await EnsureExistingTables();
-        if (tables is not null)
+        var gapsToFill = await EnsureTableIntegrity(tableName);
+        if (gapsToFill.Count != 0)
         {
-            foreach (string table in tables)
-            {
-                var gapsToFill = await CheckTableIntegrity(table);
-                await FillConcreteGaps(gapsToFill, table);
-            }
+            await FillConcreteGaps(gapsToFill, tableName);
             Console.WriteLine("\tAll gaps filled.");
-            return;
         }
-        else
-        {
-            foreach (string tableName in _tablesNames)
-            {
-                var gapsToFill = await CheckTableIntegrity(tableName);
-                await FillConcreteGaps(gapsToFill, tableName);
-            }
-        }
-        Console.WriteLine("\tAll gaps filled.");
+        else Console.WriteLine("No gaps.");
     }
 
     private async Task EnsureExistingTables()
@@ -181,13 +185,13 @@ class DbRelation
                         _tablesNames.Add(reader.GetString(0));
                     }
                 }
-                if (_tablesNames.Count == 0) throw new Exception("No tables in db");
             }
         }
     }
 
     private async Task FillConcreteGaps(List<(DateTime start, DateTime end, BybitInterval spacing)> gapsToFill, string tokenName)    // lastDate, interval, currencyName
     {
+        Console.WriteLine("Filling gaps:\n");
         foreach (var gap in gapsToFill)
         {
             DateTime start = gap.start;
@@ -198,7 +202,7 @@ class DbRelation
         }
     }
 
-    public async Task<List<(DateTime start, DateTime end, BybitInterval spacing)>> CheckTableIntegrity(string tableName) //Все разрывы open_time в таблице
+    private async Task<List<(DateTime start, DateTime end, BybitInterval spacing)>> EnsureTableIntegrity(string tableName) //Все разрывы open_time в таблице
     {
         Console.WriteLine($"Checking table integrity \"{tableName}\"");
         List<(DateTime start, DateTime end, BybitInterval spacing)> totalGaps = new();
@@ -208,8 +212,17 @@ class DbRelation
             await conn.OpenAsync();
             foreach (var interval in intervals)
             {
-                klines = new();
-                string query = $"SELECT duration, open_time FROM \"{tableName}\" where duration = CAST('{interval.Value}' as interval)order by duration asc, open_time asc";
+                int capacity = 0;
+                string capacityQuery = $"SELECT count(*) from \"{tableName}\" where duration = CAST('{interval.Value}' as interval)";
+                using (NpgsqlCommand cmd = new(capacityQuery, conn))
+                {
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync()) capacity = reader.GetInt32(0);
+                    }
+                }
+                klines = new(capacity);
+                string query = $"SELECT duration, open_time FROM \"{tableName}\" where duration = CAST('{interval.Value}' as interval)order by open_time asc";
                 using (NpgsqlCommand cmd = new(query, conn))
                 {
                     using (var reader = await cmd.ExecuteReaderAsync())
@@ -231,7 +244,7 @@ class DbRelation
         return totalGaps;
     }
 
-    public async Task FillToNow(string tableName)           // Заполняет с последнего open_time до настоящего момента(Все интервалы)
+    private async Task<bool> FillToNow(string tableName)           // Заполняет с последнего open_time до настоящего момента(Все интервалы)
     {
         List<(DateTime Key, BybitInterval Value)> lastDates = new();
         using (var conn = new NpgsqlConnection(_connectionString))
@@ -269,10 +282,10 @@ class DbRelation
             }
             await InsertData(dataToFill, intervals.Where(spacing => spacing.Key == interval).First().Value, $"{tableName}");
         }
-        await FillTablesGaps(new() { tableName });
+        return lastDates.Count > 0 ? false : true;
     }
 
-    public async Task CreateTable(string tokenName)
+    private async Task CreateTable(string tokenName)
     {
         using (var connection = new NpgsqlConnection(_connectionString))
         {
@@ -287,11 +300,8 @@ class DbRelation
             low_price decimal,
             close_price decimal,
             volume decimal,
+            quote_volume decimal,
             change_percent decimal,
-            macd_indicator macd,
-            boll_indicator boll, 
-            rsi_indicator decimal, 
-            sma_indicator decimal,
             upper_tail decimal, 
             down_tail decimal,
             PRIMARY KEY(open_time, duration));
@@ -302,28 +312,73 @@ class DbRelation
             }
         }
     }
-}
-
-public class DbRequest : ForceRequest<int>
-{
-    private int DataCount { get; set; } = 0;
-    public string TokenName { get; set; }
-    public string Duration { get; set; }
-    public DbRequest(string tokenName, string duration, int dataCount, int startPoint, int endPoint) : base(startPoint, endPoint)
+    public async Task<List<ArmedBybitMarketKline>> GetCandles(string tokenName, BybitInterval interval, int limit = 0)
     {
-        DataCount = dataCount;
-        TokenName = tokenName;
-        Duration = duration;
-        SetForceOptions();
+        List<BybitMarketKline> klines = new(0);
+        using (NpgsqlConnection connection = new(_connectionString))
+        {
+            string _interval = intervals.Where(i => i.Key == interval).First().Value;
+            await connection.OpenAsync();
+            int capacity = 0;
+            if (limit == 0)
+            {
+                string capacityQuery = $"SELECT count(*) from \"{tokenName}\" where duration = CAST('{_interval}' as interval)";
+                using (NpgsqlCommand cmd = new(capacityQuery, connection))
+                {
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync()) capacity = reader.GetInt32(0);
+                    }
+                }
+                klines = new(capacity);
+            }
+            string query = $"SELECT * FROM \"{tokenName}\" where duration = CAST('{_interval}' as interval) order by open_time desc ";
+            if (limit > 0)
+            {
+                query += $"limit {limit}";
+                klines = new(limit);
+            }
+            using (NpgsqlCommand cmd = new(query, connection))
+            {
+                using (NpgsqlDataReader reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (!reader.HasRows) throw new Exception("NO ROWS IN TABLE");
+                    Console.WriteLine("executing query");
+                    while (await reader.ReadAsync())
+                    {
+                        klines.Add(new()
+                        {
+                            OpenTime = reader.GetDateTime(0),
+                            OpenPrice = reader.GetDecimal(2),
+                            HighPrice = reader.GetDecimal(3),
+                            LowPrice = reader.GetDecimal(4),
+                            ClosePrice = reader.GetDecimal(5),
+                            Volume = reader.GetDecimal(6),
+                            QuoteVolume = reader.GetDecimal(7)
+                        });
+                    }
+                }
+                List<(DateTime, DateTime)> gaps;
+                klines = Parser.SortAndCheck(klines, interval, out gaps);
+                if (gaps.Count == 0) return klines.GetArmedKlines();
+                else
+                {
+                    await InitTable(tokenName);
+                    return await GetCandles(tokenName, interval, limit);
+                }
+            }
+        }
     }
 
-    protected override void SetForceOptions()
+    public async Task SetIndicators(string tokenName, BybitInterval interval)
     {
-        TasksCount = Math.Min((int)Math.Ceiling((double)DataCount / 2000), Environment.ProcessorCount);
-        FunctionsStartPoints = new int[TasksCount];
-        for (int step = 0; step < TasksCount; step++)
+        await InitTable(tokenName);
+        var data = await GetCandles(tokenName, interval, 10000);
+        data.GetArmedKlines();
+        foreach(var i in data)
         {
-            FunctionsStartPoints[step] = step == 0 ? StartPoint : DataCount / TasksCount * step;
+            Console.WriteLine($"{i.OpenTime} - {i.RSI}");
         }
     }
 }
+

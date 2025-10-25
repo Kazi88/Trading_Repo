@@ -110,7 +110,7 @@ public class FuturesTrader
         try
         {
             var balances = await _apiClient.Account.GetBalancesAsync();
-            walletBalance = balances.Data.Last().TotalEquity - 30 ?? 0;
+            // walletBalance = balances.Data.Last().TotalEquity - 30 ?? 0;
         }
         catch (Exception ex)
         {

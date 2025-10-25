@@ -1,0 +1,5 @@
+{
+    "BYBIT_API_KEY": "oyYKEmJXgmgpTBLDWw",
+    "BYBIT_API_SECRET":"dEACCUmfFFyOzJtpZcQJ37xlVLY4Qw4fySj9",
+    "DB_CONNECTION_STRING": "Host=localhost;Port=5432;Database=candles_repo;Username=super_user;Password=qwerty"
+}

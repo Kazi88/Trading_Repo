@@ -47,11 +47,15 @@
           "dependencies": {
             "Bybit.Api": {
               "target": "Package",
-              "version": "[5.5.721, )"
+              "version": "[5.5.1019, )"
             },
             "Bybit.Net": {
               "target": "Package",
-              "version": "[5.8.0, )"
+              "version": "[5.10.1, )"
+            },
+            "InfluxDB.Client.Core": {
+              "target": "Package",
+              "version": "[4.18.0, )"
             },
             "Npgsql.EntityFrameworkCore.PostgreSQL": {
               "target": "Package",

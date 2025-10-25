@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Trading_Repo")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+dacf042b92aa90647433c9ccb2b340163470c618")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+76392cccf4ee6d90afa0bb5aa14ca79d411ca581")]
 [assembly: System.Reflection.AssemblyProductAttribute("Trading_Repo")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Trading_Repo")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
