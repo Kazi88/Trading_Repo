@@ -25,6 +25,8 @@ public class ChartRequest : ForceRequest<DateTime>
     public ChartRequest(string currencyName, BybitInterval intervalToSearch, DateTime startPoint, DateTime endPoint)
     : base(startPoint, endPoint)
     {
+        if (endPoint.AddSeconds((int)intervalToSearch) > DateTime.Now) endPoint = endPoint.AddSeconds(-(int)intervalToSearch);
+        endPoint.AddSeconds(-endPoint.Second);
         Capacity = (int)((endPoint - startPoint).TotalMinutes / ((int)intervalToSearch / 60));
         CurrencyName = currencyName;
         IntervalToSearch = intervalToSearch;

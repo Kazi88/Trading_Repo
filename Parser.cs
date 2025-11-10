@@ -59,6 +59,11 @@ public class Parser
         }
     }
 
+    public static bool IsCandleClosed(BybitInterval interval, DateTime openTime, DateTime start)
+    {
+        return openTime.AddSeconds((int)interval) < start;
+    }
+
     public async Task<BybitMarketKline> GetCurrentCandle(string currencyName, BybitInterval interval)
     {
         var a = await _apiClient.Market.GetKlinesAsync(BybitCategory.Linear, currencyName, interval, DateTime.UtcNow.AddMinutes(-(int)interval / 60), DateTime.UtcNow, 1);
@@ -95,15 +100,18 @@ public class Parser
         {
             try
             {
-                Console.Write($"|{request.CurrencyName} - {request.IntervalToSearch}|");
+                Console.WriteLine($"|{request.CurrencyName} - {request.IntervalToSearch}|");
                 sw.Start();
                 var query = await _apiClient.Market.GetKlinesAsync(BybitCategory.Linear, request.CurrencyName, request.IntervalToSearch, request.StartPoint, request.EndPoint, 1000);
                 sw.Stop();
-                foreach (var kline in query.Data) marketKlines.Add(kline);
+                foreach (var kline in query.Data)
+                {
+                    if (IsCandleClosed(request.IntervalToSearch, kline.OpenTime, startTime)) marketKlines.Add(kline);
+                }
                 marketKlines = marketKlines.OrderBy(kline => kline.OpenTime).DistinctBy(kline => kline.OpenTime).ToList();
                 if(startTime < marketKlines.TakeLast(1).First().OpenTime.AddSeconds((int)request.IntervalToSearch))
                 {
-                    marketKlines = marketKlines.Take(marketKlines.Count - 1).ToList();
+                    marketKlines = marketKlines.TakeLast(marketKlines.Count - 1).ToList();
                 }
                 return SortAndCheck(marketKlines, request.IntervalToSearch, out _, sw.ElapsedMilliseconds);
             }
@@ -115,7 +123,7 @@ public class Parser
             }
         }
         Task[] finders = new Task[request.TasksCount];
-        Console.Write($"|{request.CurrencyName} - {request.IntervalToSearch}|");
+        Console.WriteLine($"|{request.CurrencyName} - {request.IntervalToSearch}|");
         sw.Start();
         try
         {
@@ -158,8 +166,6 @@ public class Parser
             sw.Stop();
             if (marketKlines.Count == 0) return await GetChartForTerm(request, marketKlines);
             marketKlines = marketKlines.OrderBy(kline => kline.OpenTime).DistinctBy(kline => kline.OpenTime).ToList();
-            Console.WriteLine("THERE: " + startTime + " " + marketKlines.TakeLast(1).First().OpenTime.AddSeconds((int)request.IntervalToSearch));
-                Thread.Sleep(10000);
             if(startTime < marketKlines.TakeLast(1).First().OpenTime.AddSeconds((int)request.IntervalToSearch))
             {
                 marketKlines = marketKlines.Take(marketKlines.Count - 1).ToList();
@@ -209,8 +215,8 @@ public class Parser
                 continue;
             }
         }
-        if (gaps.Count == 0) Console.WriteLine($"\tData is full: {marketKlines.First().OpenTime} - {marketKlines.Last().OpenTime}, {(double)elapsedMilliseconds / 1000} sec, {marketKlines.Count} records - {interval}");
-        else Console.WriteLine("Data with gaps");
+        if (gaps.Count == 0) Console.WriteLine($"\t\t\tData is full: {marketKlines.First().OpenTime} - {marketKlines.Last().OpenTime}, {(double)elapsedMilliseconds / 1000} sec, {marketKlines.Count} records - {interval}");
+        else Console.WriteLine("\t\t\tData with gaps");
         return marketKlines;
     }
 

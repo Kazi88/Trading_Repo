@@ -10,7 +10,7 @@ public class Signaler
 
     public async Task GetSignalsByQuoteVolume(DbRelation relation, string tokenName, BybitInterval interval, int candlesCount)
     {
-        List<ArmedBybitMarketKline> klines = (await relation.GetCandles(tokenName, interval)).TakeLast(10000).ToList();
+        List<ArmedBybitMarketKline> klines = (await relation.GetCandles(tokenName, interval)).TakeLast(2000).ToList();
         decimal bullQV = 0;
         decimal bearQV = 0;
 
@@ -39,7 +39,7 @@ public class Signaler
 
     public async Task GetSignalsByVolume(DbRelation relation, string tokenName, BybitInterval interval, int candlesCount)
     {
-        List<ArmedBybitMarketKline> klines = (await relation.GetCandles(tokenName, interval)).TakeLast(10000).ToList();
+        List<ArmedBybitMarketKline> klines = (await relation.GetCandles(tokenName, interval)).ToList();
         decimal bull = 0;
         decimal bear = 0;
 
