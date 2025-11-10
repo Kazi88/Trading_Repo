@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "/home/ilya/Документы/Trading_Repo/Trading_Repo.csproj": {}
+    "/home/ilya/Documents/Trading_Repository/Trading_Repo/Trading_Repo.csproj": {}
   },
   "projects": {
-    "/home/ilya/Документы/Trading_Repo/Trading_Repo.csproj": {
+    "/home/ilya/Documents/Trading_Repository/Trading_Repo/Trading_Repo.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/home/ilya/Документы/Trading_Repo/Trading_Repo.csproj",
+        "projectUniqueName": "/home/ilya/Documents/Trading_Repository/Trading_Repo/Trading_Repo.csproj",
         "projectName": "Trading_Repo",
-        "projectPath": "/home/ilya/Документы/Trading_Repo/Trading_Repo.csproj",
+        "projectPath": "/home/ilya/Documents/Trading_Repository/Trading_Repo/Trading_Repo.csproj",
         "packagesPath": "/home/ilya/.nuget/packages/",
-        "outputPath": "/home/ilya/Документы/Trading_Repo/obj/",
+        "outputPath": "/home/ilya/Documents/Trading_Repository/Trading_Repo/obj/",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "/home/ilya/.nuget/NuGet/NuGet.Config"

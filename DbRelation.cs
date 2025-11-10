@@ -182,38 +182,6 @@ public class DbRelation
         Console.WriteLine("\tAll gaps filled.");
     }
 
-    private async Task EnsureExistingTables()
-    {
-        using (var conn = new NpgsqlConnection(_connectionString))
-        {
-            string tablesNamesQuery = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'";
-            await conn.OpenAsync();
-            using (NpgsqlCommand cmd = new(tablesNamesQuery, conn))
-            {
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        _tablesNames.Add(reader.GetString(0));
-                    }
-                }
-                if (_tablesNames.Count == 0) throw new Exception("No tables in db");
-            }
-        }
-    }
-
-    private async Task FillConcreteGaps(List<(DateTime start, DateTime end, BybitInterval spacing)> gapsToFill, string tokenName)    // lastDate, interval, currencyName
-    {
-        foreach (var gap in gapsToFill)
-        {
-            DateTime start = gap.start;
-            DateTime end = gap.end;
-            int interval = (int)gap.spacing;
-            var data = (await _parser.GetChartForTerm(tokenName, (BybitInterval)interval, start.AddSeconds(interval), end.AddSeconds(-interval))).GetArmedKlines();
-            await InsertData(data, intervals.Where(interval => interval.Key == gap.spacing).First().Value, $"{tokenName}");
-        }
-    }
-
     private async Task FillTableGaps(string tableName) // all existing or concrete //Заполняет разрывы в open_time(Все интервалы)
     {
         await EnsureExistingTables();
@@ -226,6 +194,39 @@ public class DbRelation
         else Console.WriteLine("No gaps.");
     }
 
+    public async Task<List<(DateTime start, DateTime end, BybitInterval spacing)>> CheckTableIntegrity(string tableName) //Все разрывы open_time в таблице
+    {
+        Console.WriteLine($"Checking table integrity \"{tableName}\"");
+        List<(DateTime start, DateTime end, BybitInterval spacing)> totalGaps = new();
+        List<BybitMarketKline> klines;
+        using (NpgsqlConnection conn = new NpgsqlConnection(_connectionString))
+        {
+            await conn.OpenAsync();
+            foreach (var interval in intervals)
+            {
+                klines = new();
+                string query = $"SELECT duration, open_time FROM \"{tableName}\" where duration = CAST('{interval.Value}' as interval)order by duration asc, open_time asc";
+                using (NpgsqlCommand cmd = new(query, conn))
+                {
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            klines.Add(new() { OpenTime = reader.GetDateTime(1) });
+                        }
+                    }
+                }
+                List<(DateTime Key, DateTime Value)> gaps;
+                if (klines.Count >= 2)
+                {
+                    Parser.SortAndCheck(klines, interval.Key, out gaps);
+                    foreach (var gap in gaps) totalGaps.Add((gap.Key, gap.Value, interval.Key));
+                }
+            }
+        }
+        return totalGaps;
+    }
+    
     private async Task EnsureExistingTables()
     {
         using (var conn = new NpgsqlConnection(_connectionString))
